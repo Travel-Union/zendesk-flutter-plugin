@@ -177,6 +177,24 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
           result.success(null);
         }
         break;
+      case "resendMessage":
+        if (chatApi == null) {
+          result.error("CHAT_NOT_STARTED", null, null);
+        } else {
+          String messageId = call.argument("messageId");
+          chatApi.resend(messageId);
+          result.success(null);
+        }
+        break;
+      case "sendComment":
+        if (chatApi == null) {
+          result.error("CHAT_NOT_STARTED", null, null);
+        } else {
+          String comment = call.argument("comment");
+          chatApi.sendChatComment(comment);
+          result.success(null);
+        }
+        break;
       case "sendAttachment":
         if (chatApi == null) {
           result.error("CHAT_NOT_STARTED", null, null);

@@ -74,6 +74,16 @@ class ZendeskFlutterPlugin {
         .invokeMethod('sendMessage', <String, dynamic>{'message': message});
   }
 
+  Future<void> resendMessage(String messageId) async {
+    return await _callsChannel
+        .invokeMethod('resendMessage', <String, dynamic>{'messageId': messageId});
+  }
+
+  Future<void> sendComment(String comment) async {
+    return await _callsChannel
+        .invokeMethod('sendComment', <String, dynamic>{'comment': comment});
+  }
+
   Future<void> sendAttachment(String pathname) async {
     return await _callsChannel.invokeMethod('sendAttachment', <String, dynamic>{
       'pathname': pathname,
