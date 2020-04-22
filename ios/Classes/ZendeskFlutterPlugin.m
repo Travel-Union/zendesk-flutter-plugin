@@ -104,7 +104,28 @@
     }
     [self.chatApi sendChatMessage:call.arguments[@"message"]];
     result(nil);
-  } else if ([@"sendAttachment" isEqualToString:call.method]) {
+  } else if ([@"resendMessage" isEqualToString:call.method]) {
+     if (self.chatApi == nil) {
+       result([FlutterError errorWithCode:@"CHAT_NOT_STARTED" message:nil details:nil]);
+       return;
+     }
+      NSPredicate *predicate = [NSPredicate predicateWithFormat:@"eventId == %@", call.arguments[@"messageId"]];
+      NSArray *filteredChatEvents = [self.chatApi.livechatLog filteredArrayUsingPredicate:predicate];
+      ZDCChatEvent *chatEvent = [filteredChatEvents firstObject];
+      
+      if(chatEvent != nil) {
+          [self.chatApi resendChatMessage:chatEvent];
+      }
+      
+      result(nil);
+   } else if ([@"sendComment" isEqualToString:call.method]) {
+      if (self.chatApi == nil) {
+        result([FlutterError errorWithCode:@"CHAT_NOT_STARTED" message:nil details:nil]);
+        return;
+      }
+      [self.chatApi sendChatRatingComment:call.arguments[@"comment"]];
+      result(nil);
+    } else if ([@"sendAttachment" isEqualToString:call.method]) {
     if (self.chatApi == nil) {
       result([FlutterError errorWithCode:@"CHAT_NOT_STARTED" message:nil details:nil]);
       return;
