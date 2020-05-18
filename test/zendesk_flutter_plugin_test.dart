@@ -23,12 +23,12 @@ void main() {
 
   group('Model tests', () {
     test('properly converts to ConnectionStatus', () {
-      expect(
-          toConnectionStatus('noConnection'), ConnectionStatus.NO_CONNECTION);
-      expect(
-          toConnectionStatus('NO_CONNECTION'), ConnectionStatus.NO_CONNECTION);
-      expect(toConnectionStatus('closed'), ConnectionStatus.CLOSED);
-      expect(toConnectionStatus('CLOSED'), ConnectionStatus.CLOSED);
+      expect(toConnectionStatus('failed'), ConnectionStatus.FAILED);
+      expect(toConnectionStatus('FAILED'), ConnectionStatus.FAILED);
+      expect(toConnectionStatus('unreachable'), ConnectionStatus.UNREACHABLE);
+      expect(toConnectionStatus('UNREACHABLE'), ConnectionStatus.UNREACHABLE);
+      expect(toConnectionStatus('reconnecting'), ConnectionStatus.RECONNECTING);
+      expect(toConnectionStatus('RECONNECTING'), ConnectionStatus.RECONNECTING);
       expect(toConnectionStatus('disconnected'), ConnectionStatus.DISCONNECTED);
       expect(toConnectionStatus('DISCONNECTED'), ConnectionStatus.DISCONNECTED);
       expect(toConnectionStatus('connecting'), ConnectionStatus.CONNECTING);
@@ -51,16 +51,13 @@ void main() {
     });
 
     test('properly converts to ChatItemType', () {
-      expect(toChatItemType('chat.memberjoin'), ChatItemType.MEMBER_JOIN);
-      expect(toChatItemType('chat.memberleave'), ChatItemType.MEMBER_LEAVE);
-      expect(toChatItemType('chat.msg'), ChatItemType.MESSAGE);
-      expect(toChatItemType('chat.systemmsg'), ChatItemType.MESSAGE);
-      expect(toChatItemType('chat.triggermsg'), ChatItemType.MESSAGE);
-      expect(
-          toChatItemType('chat.request.rating'), ChatItemType.REQUEST_RATING);
-      expect(toChatItemType('chat.rating'), ChatItemType.RATING);
-      expect(toChatItemType('chat.comment'), ChatItemType.RATING);
-      expect(toChatItemType('other_type'), ChatItemType.UNKNOWN);
+      expect(toChatItemType('MEMBER_JOIN'), ChatItemType.MEMBER_JOIN);
+      expect(toChatItemType('MEMBER_LEAVE'), ChatItemType.MEMBER_LEAVE);
+      expect(toChatItemType('MESSAGE'), ChatItemType.MESSAGE);
+      expect(toChatItemType('RATING_REQUEST'), ChatItemType.RATING_REQUEST);
+      expect(toChatItemType('RATING'), ChatItemType.RATING);
+      expect(toChatItemType('COMMENT'), ChatItemType.COMMENT);
+      expect(toChatItemType('ATTACHMENT_MESSAGE'), ChatItemType.ATTACHMENT_MESSAGE);
       expect(toChatItemType(null), ChatItemType.UNKNOWN);
       expect(toChatItemType(''), ChatItemType.UNKNOWN);
     });
@@ -68,8 +65,8 @@ void main() {
     test('properly converts to ChatRating', () {
       expect(toChatRating('good'), ChatRating.GOOD);
       expect(toChatRating('bad'), ChatRating.BAD);
-      expect(toChatRating('unrated'), ChatRating.UNRATED);
       expect(toChatRating(null), ChatRating.UNKNOWN);
+      expect(toChatRating(''), ChatRating.UNKNOWN);
       expect(toChatRating('other'), ChatRating.UNKNOWN);
     });
 
@@ -140,7 +137,7 @@ void main() {
     test('properly parses ChatItems json for Android', () {
       DateTime now = DateTime.now();
       List<ChatItem> items = ChatItem.parseChatItemsJsonForAndroid(
-          '{"1":{"timestamp":${now.millisecondsSinceEpoch}, "type":"chat.msg", "display_name":"aaa", "msg":"bbb", "nick":"ccc", '
+          '{"1":{"createTimestamp":${now.millisecondsSinceEpoch}, "modifyTimestamp":${now.millisecondsSinceEpoch}, "type":"MESSAGE", "displayName":"aaa", "message":"bbb", "nick":"ccc", '
               '"attachment":{"mime_type":"ddd", "name":"eee", "size":1, "type":"fff", "url":"ggg", "thumbnail":"hhh"}, "unverified":true, "failed": false, "options":"yes/no",'
               '"converted_options":[{"label":"yes", "selected":false},{"label":"no", "selected":true}], "upload_progress":0, "rating":"bad", "new_rating":"good", "new_comment":"comment line"}}',
           'android');
@@ -148,7 +145,9 @@ void main() {
       expect(items.length, 1);
 
       expect(items[0].id, "1");
-      expect(items[0].timestamp.millisecondsSinceEpoch,
+      expect(items[0].createTimestamp.millisecondsSinceEpoch,
+          now.millisecondsSinceEpoch);
+      expect(items[0].modifyTimestamp.millisecondsSinceEpoch,
           now.millisecondsSinceEpoch);
       expect(items[0].type, ChatItemType.MESSAGE);
       expect(items[0].displayName, 'aaa');
@@ -182,7 +181,7 @@ void main() {
     test('properly parses ChatItems json for iOS', () {
       DateTime now = DateTime.now();
       List<ChatItem> items = ChatItem.parseChatItemsJsonForIOS(
-          '[{"id":"1", "timestamp":${now.millisecondsSinceEpoch}, "type":"chat.msg", "display_name":"aaa", "msg":"bbb", "nick":"ccc", '
+          '[{"id":"1", "createTimestamp":${now.millisecondsSinceEpoch}, "modifyTimestamp":${now.millisecondsSinceEpoch}, "type":"MESSAGE", "displayName":"aaa", "msg":"bbb", "nick":"ccc", '
               '"attachment":{"mime_type":"ddd", "name":"eee", "size":1, "type":"fff", "url":"ggg", "thumbnail_url":"hhh"}, "verified":false, "failed": false, "options":["yes","no"],'
               '"selectedOptionIndex":1, "upload_progress":0, "rating":"bad", "new_rating":"good", "new_comment":"comment line"}]',
           'ios');
@@ -190,7 +189,9 @@ void main() {
       expect(items.length, 1);
 
       expect(items[0].id, "1");
-      expect(items[0].timestamp.millisecondsSinceEpoch,
+      expect(items[0].createTimestamp.millisecondsSinceEpoch,
+          now.millisecondsSinceEpoch);
+      expect(items[0].modifyTimestamp.millisecondsSinceEpoch,
           now.millisecondsSinceEpoch);
       expect(items[0].type, ChatItemType.MESSAGE);
       expect(items[0].displayName, 'aaa');

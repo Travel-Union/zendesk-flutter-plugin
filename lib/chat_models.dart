@@ -3,12 +3,13 @@ import 'dart:convert';
 import 'dart:io' show Platform;
 
 enum ConnectionStatus {
-  UNKNOWN,
-  NO_CONNECTION,
-  CLOSED,
-  DISCONNECTED,
   CONNECTING,
-  CONNECTED
+  RECONNECTING,
+  CONNECTED,
+  DISCONNECTED,
+  FAILED,
+  UNREACHABLE,
+  UNKNOWN
 }
 
 enum AccountStatus {
@@ -22,27 +23,47 @@ enum ChatItemType {
   MEMBER_JOIN,
   MEMBER_LEAVE,
   MESSAGE,
-  SYSTEM_MESSAGE,
-  TRIGGER_MESSAGE,
-  REQUEST_RATING,
+  ATTACHMENT_MESSAGE,
+  RATING_REQUEST,
   RATING,
+  COMMENT,
 }
 
 enum ChatRating {
   GOOD,
   BAD,
-  UNRATED,
   UNKNOWN,
+}
+
+enum DeliveryStatus {
+  CANCELLED,
+  DELIVERED,
+  FAILED_FILE_SENDING_DISABLED,
+  FAILED_FILE_SIZE_TOO_LARGE,
+  FAILED_INTERNAL_SERVER_ERROR,
+  FAILED_RESPONSE_TIMEOUT,
+  FAILED_UNKNOWN_REASON,
+  FAILED_UNSUPPORTED_FILE_TYPE,
+  PENDING,
+  UNKNOWN,
+}
+
+enum ChatParticipant {
+    VISITOR,
+    AGENT,
+    TRIGGER,
+    SYSTEM,
+    UNKNOWN,
 }
 
 ConnectionStatus toConnectionStatus(String value) {
   switch (value) {
-    case 'noConnection':
-    case 'NO_CONNECTION':
-      return ConnectionStatus.NO_CONNECTION;
-    case 'closed':
-    case 'CLOSED':
-      return ConnectionStatus.CLOSED;
+    case 'unreachable':
+    case 'UNREACHABLE':
+      return ConnectionStatus.UNREACHABLE;
+    case 'reconnecting':
+    case 'RECONNECTING':
+      return ConnectionStatus.RECONNECTING;
     case 'disconnected':
     case 'DISCONNECTED':
       return ConnectionStatus.DISCONNECTED;
@@ -52,6 +73,9 @@ ConnectionStatus toConnectionStatus(String value) {
     case 'connected':
     case 'CONNECTED':
       return ConnectionStatus.CONNECTED;
+    case 'failed':
+    case 'FAILED':
+      return ConnectionStatus.FAILED;
     default:
       return ConnectionStatus.UNKNOWN;
   }
@@ -72,19 +96,20 @@ AccountStatus toAccountStatus(String value) {
 
 ChatItemType toChatItemType(String value) {
   switch (value) {
-    case 'chat.memberjoin':
+    case 'MEMBER_JOIN':
       return ChatItemType.MEMBER_JOIN;
-    case 'chat.memberleave':
+    case 'MEMBER_LEAVE':
       return ChatItemType.MEMBER_LEAVE;
-    case 'chat.msg':
-    case 'chat.systemmsg':
-    case 'chat.triggermsg':
+    case 'MESSAGE':
       return ChatItemType.MESSAGE;
-    case 'chat.request.rating':
-      return ChatItemType.REQUEST_RATING;
-    case 'chat.rating':
-    case 'chat.comment':
+    case 'RATING_REQUEST':
+      return ChatItemType.RATING_REQUEST;
+    case 'RATING':
       return ChatItemType.RATING;
+    case 'COMMENT':
+      return ChatItemType.COMMENT;
+    case 'ATTACHMENT_MESSAGE':
+      return ChatItemType.ATTACHMENT_MESSAGE;
     default:
       return ChatItemType.UNKNOWN;
   }
@@ -92,14 +117,52 @@ ChatItemType toChatItemType(String value) {
 
 ChatRating toChatRating(String value) {
   switch (value) {
-    case 'good':
+    case 'GOOD':
       return ChatRating.GOOD;
-    case 'bad':
+    case 'BAD':
       return ChatRating.BAD;
-    case 'unrated':
-      return ChatRating.UNRATED;
     default:
       return ChatRating.UNKNOWN;
+  }
+}
+
+DeliveryStatus toDeliveryStatus(String value) {
+  switch (value) {
+    case 'CANCELLED':
+      return DeliveryStatus.CANCELLED;
+    case 'DELIVERED':
+      return DeliveryStatus.DELIVERED;
+    case 'FAILED_FILE_SENDING_DISABLED':
+      return DeliveryStatus.FAILED_FILE_SENDING_DISABLED;
+    case 'FAILED_FILE_SIZE_TOO_LARGE':
+      return DeliveryStatus.FAILED_FILE_SIZE_TOO_LARGE;
+    case 'FAILED_INTERNAL_SERVER_ERROR':
+      return DeliveryStatus.FAILED_INTERNAL_SERVER_ERROR;
+    case 'FAILED_RESPONSE_TIMEOUT':
+      return DeliveryStatus.FAILED_RESPONSE_TIMEOUT;
+    case 'FAILED_UNKNOWN_REASON':
+      return DeliveryStatus.FAILED_UNKNOWN_REASON;
+    case 'FAILED_UNSUPPORTED_FILE_TYPE':
+      return DeliveryStatus.FAILED_UNSUPPORTED_FILE_TYPE;
+    case 'PENDING':
+      return DeliveryStatus.PENDING;
+    default:
+      return DeliveryStatus.UNKNOWN;
+  }
+}
+
+ChatParticipant toChatParticipant(String value) {
+  switch (value) {
+    case 'VISITOR':
+      return ChatParticipant.VISITOR;
+    case 'AGENT':
+      return ChatParticipant.AGENT;
+    case 'TRIGGER':
+      return ChatParticipant.TRIGGER;
+    case 'SYSTEM':
+      return ChatParticipant.SYSTEM;
+    default:
+      return ChatParticipant.UNKNOWN;
   }
 }
 
@@ -140,8 +203,12 @@ class Agent extends AbstractModel {
     }
   }
 
+  String get nick {
+    return attribute('nick');
+  }
+
   bool get isTyping {
-    return attribute('typing');
+    return attribute('is_typing');
   }
 
   String get avatarUri {
@@ -157,8 +224,8 @@ class Agent extends AbstractModel {
   static List<Agent> parseAgentsJson(String json,
       [@visibleForTesting String os]) {
     var out = List<Agent>();
-    jsonDecode(json).forEach((key, value) {
-      out.add(Agent(key, value, os));
+    jsonDecode(json).forEach((value) {
+      out.add(Agent(null, value, os));
     });
     return out;
   }
@@ -206,19 +273,26 @@ class ChatOption extends AbstractModel {
 }
 
 class ChatItem extends AbstractModel {
-  ChatItem(String id, Map attrs, [@visibleForTesting String os])
-      : super(id, attrs, os);
+  ChatItem(Map attrs, [@visibleForTesting String os])
+      : super(attrs['id'], attrs, os);
 
-  DateTime get timestamp =>
-      DateTime.fromMillisecondsSinceEpoch(attribute('timestamp'), isUtc: false);
+  DateTime get createTimestamp =>
+      DateTime.fromMillisecondsSinceEpoch(attribute('create_timestamp'), isUtc: false);
+
+  DateTime get modifyTimestamp =>
+      DateTime.fromMillisecondsSinceEpoch(attribute('modify_timestamp'), isUtc: false);
 
   ChatItemType get type => toChatItemType(attribute('type'));
 
+  DeliveryStatus get deliveryStatus => toDeliveryStatus(attribute('delivery_status'));
+
   String get displayName => attribute('display_name');
-
-  String get message => attribute('msg');
-
+  
   String get nick => attribute('nick');
+
+  ChatParticipant get participant => toChatParticipant(attribute('participant'));
+
+  String get message => attribute('message');
 
   Attachment get attachment {
     dynamic raw = attribute('attachment');
@@ -276,17 +350,19 @@ class ChatItem extends AbstractModel {
 
   int get uploadProgress => attribute('upload_progress');
 
-  ChatRating get rating => toChatRating(attribute('rating'));
+  ChatRating get rating => toChatRating(attribute('previous_rating'));
 
-  ChatRating get newRating => toChatRating(attribute('new_rating'));
+  ChatRating get newRating => toChatRating(attribute('current_rating'));
 
-  String get newComment => attribute('new_comment');
+  String get previousComment => attribute('previous_comment');
+
+  String get newComment => attribute('current_comment');
 
   static List<ChatItem> parseChatItemsJsonForAndroid(String json,
       [@visibleForTesting String os]) {
     var out = List<ChatItem>();
-    jsonDecode(json).forEach((key, value) {
-      out.add(ChatItem(key, value, os));
+    jsonDecode(json).forEach((value) {
+      out.add(ChatItem(value, os));
     });
     return out;
   }
@@ -295,7 +371,7 @@ class ChatItem extends AbstractModel {
       [@visibleForTesting String os]) {
     var out = List<ChatItem>();
     jsonDecode(json).forEach((value) {
-      out.add(ChatItem(value['id'], value, os));
+      out.add(ChatItem(value, os));
     });
     return out;
   }

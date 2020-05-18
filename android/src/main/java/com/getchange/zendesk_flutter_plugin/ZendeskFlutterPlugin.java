@@ -25,7 +25,10 @@ import zendesk.chat.OfflineForm;
 import zendesk.chat.ProfileProvider;
 import zendesk.chat.VisitorInfo;
 
+import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 import static com.google.gson.FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES;
 
@@ -131,11 +134,6 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
           profileProvider.addVisitorTags(Arrays.asList(tags.split(",")), null);
         }
 
-        if (!TextUtils.isEmpty(applicationId)) {
-          //sessionConfig.visitorPathTwo(applicationId);
-          //sessionConfig.visitorPathOne("Mobile Chat connected");
-        }
-
         bindChatListeners();
 
         Chat.INSTANCE.providers().connectionProvider().connect();
@@ -174,15 +172,10 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
           result.success(null);
         }
         break;
-      /*case "sendAttachment":
+      case "sendAttachment":
         if (Chat.INSTANCE.providers().connectionProvider().getConnectionStatus() != ConnectionStatus.CONNECTED) {
           result.error("CHAT_NOT_STARTED", null, null);
         } else {
-          FileSending policy = ZopimChatApi.getDataSource().getFileSending();
-          if (policy == null || !policy.isEnabled() || policy.getExtensions() == null) {
-            result.error("ATTACHMENT_SEND_DISABLED", null, null);
-            return;
-          }
           String pathname = call.argument("pathname");
           if (TextUtils.isEmpty(pathname)) {
             result.error("ATTACHMENT_EMPTY_PATHNAME", null, null);
@@ -193,19 +186,10 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
             result.error("ATTACHMENT_NOT_FILE", null, null);
             return;
           }
-          String ext = "";
-          int i = file.getName().lastIndexOf(".");
-          if (i >= 0) {
-            ext = file.getName().substring(i+1);
-          }
-          if (!Arrays.asList(policy.getExtensions()).contains(ext)) {
-            result.error("ATTACHMENT_DISALLOWED_EXTENSION", null, null);
-            return;
-          }
           Chat.INSTANCE.providers().chatProvider().sendFile(file, null);
           result.success(null);
         }
-        break;*/
+        break;
       case "sendChatRating": {
         if (Chat.INSTANCE.providers().connectionProvider().getConnectionStatus() != ConnectionStatus.CONNECTED) {
           result.error("CHAT_NOT_STARTED", null, null);
@@ -240,7 +224,7 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
           return;
         }
 
-        Chat.INSTANCE.providers().chatProvider().sendOfflineForm(OfflineForm.builder(call.argument("message")).build(), null);
+        Chat.INSTANCE.providers().chatProvider().sendOfflineForm(OfflineForm.builder(call.argument("message")).withVisitorInfo(info).build(), null);
 
         result.success(null);
 
@@ -277,15 +261,24 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
     Chat.INSTANCE.providers().chatProvider().observeChatState(chatScope, new Observer<ChatState>() {
       @Override
       public void update(ChatState chatState) {
+        List<ChatAgent> agents = new ArrayList<>();
+
         for (Agent agent: chatState.getAgents()) {
-          mainHandler.post(() -> {
-            agentsStreamHandler.success(toJson(agent));
-          });
+          agents.add(ChatAgent.fromAgent(agent));
         }
 
         mainHandler.post(() -> {
-          String json = toJson(chatState.getChatLogs());
-          chatItemsStreamHandler.success(json);
+          agentsStreamHandler.success(toJson(agents));
+        });
+
+        List<ChatLogEvent> chatLogs = new ArrayList<>();
+
+        for (ChatLog chatLog: chatState.getChatLogs()) {
+          chatLogs.add(ChatLogEvent.fromChatLog(chatLog));
+        }
+
+        mainHandler.post(() -> {
+          chatItemsStreamHandler.success(toJson(chatLogs));
         });
       }
     });
