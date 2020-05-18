@@ -23,7 +23,7 @@ rootProject.allprojects {
 apply plugin: 'com.android.library'
 
 dependencies {
-    implementation 'com.zopim.android:sdk:1.4.5'
+    implementation group: 'com.zendesk', name: 'chat-providers', version: '2.0.0'
 }
 
 android {

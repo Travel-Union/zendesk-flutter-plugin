@@ -5,32 +5,27 @@ import android.os.Looper;
 import android.text.TextUtils;
 
 import com.google.gson.GsonBuilder;
-import com.zopim.android.sdk.api.ChatApi;
-import com.zopim.android.sdk.api.ZopimChatApi;
-import com.zopim.android.sdk.data.DataSource;
-import com.zopim.android.sdk.data.observers.AccountObserver;
-import com.zopim.android.sdk.data.observers.AgentsObserver;
-import com.zopim.android.sdk.data.observers.ChatLogObserver;
-import com.zopim.android.sdk.data.observers.ConnectionObserver;
-import com.zopim.android.sdk.model.Account;
-import com.zopim.android.sdk.model.Agent;
-import com.zopim.android.sdk.model.ChatLog;
-import com.zopim.android.sdk.model.Connection;
-import com.zopim.android.sdk.model.FileSending;
-import com.zopim.android.sdk.model.VisitorInfo;
 
 import io.flutter.plugin.common.EventChannel;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.PluginRegistry;
-import io.flutter.app.FlutterFragmentActivity;
+import zendesk.chat.Account;
+import zendesk.chat.Agent;
+import zendesk.chat.Chat;
+import zendesk.chat.ChatLog;
+import zendesk.chat.ChatProvider;
+import zendesk.chat.ChatRating;
+import zendesk.chat.ChatState;
+import zendesk.chat.ConnectionStatus;
+import zendesk.chat.ObservationScope;
+import zendesk.chat.Observer;
+import zendesk.chat.OfflineForm;
+import zendesk.chat.ProfileProvider;
+import zendesk.chat.VisitorInfo;
 
-import java.io.File;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 
 import static com.google.gson.FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES;
 
@@ -39,14 +34,11 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
 
   private Handler mainHandler = new Handler(Looper.getMainLooper());
   private PluginRegistry.Registrar registrar;
-  private ZopimChatApi.DefaultConfig config = null;
-  private ChatApi chatApi = null;
   private String applicationId = null;
 
-  private ConnectionObserver connectionObserver = null;
-  private AccountObserver accountObserver = null;
-  private AgentsObserver agentsObserver = null;
-  private ChatLogObserver chatLogObserver = null;
+  private ObservationScope connectionScope = null;
+  private ObservationScope accountScope = null;
+  private ObservationScope chatScope = null;
 
   private ZendeskFlutterPlugin.EventChannelStreamHandler connectionStreamHandler = new ZendeskFlutterPlugin.EventChannelStreamHandler();
   private ZendeskFlutterPlugin.EventChannelStreamHandler accountStreamHandler = new ZendeskFlutterPlugin.EventChannelStreamHandler();
@@ -80,9 +72,6 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
   }
 
   public static void registerWith(PluginRegistry.Registrar registrar) {
-    if (!(registrar.activity() instanceof FlutterFragmentActivity)) {
-      throw new IllegalArgumentException("FRAGMENT_ACTIVITY_REQUIRED. Add dependency \"implementation 'com.android.support:support-v4:28.0.0'\" in build.gradle and extend your MainActivity from FlutterFragmentActivity");
-    }
     final MethodChannel callsChannel = new MethodChannel(registrar.messenger(), "plugins.flutter.zendesk_chat_api/calls");
     final EventChannel connectionStatusEventsChannel = new EventChannel(registrar.messenger(), "plugins.flutter.zendesk_chat_api/connection_status_events");
     final EventChannel accountStatusEventsChannel = new EventChannel(registrar.messenger(),"plugins.flutter.zendesk_chat_api/account_status_events");
@@ -110,93 +99,83 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
         result.success("Android " + android.os.Build.VERSION.RELEASE);
         break;
       case "init":
-        if (config == null) {
-          applicationId = call.argument("applicationId");
-          final String accountKey = call.argument("accountKey");
-          try {
-            config = ZopimChatApi.init(accountKey).disableVisitorInfoStorage();
-          } catch (Exception e) {
-            result.error("UNABLE_TO_INITIALIZE_CHAT_API", e.getMessage(), e);
-            break;
-          }
+        applicationId = call.argument("applicationId");
+        final String accountKey = call.argument("accountKey");
+        try {
+          Chat.INSTANCE.init(registrar.activity(), accountKey);
+        } catch (Exception e) {
+          result.error("UNABLE_TO_INITIALIZE_CHAT_API", e.getMessage(), e);
+          break;
         }
         result.success(null);
         break;
       case "startChat":
-        if (config == null) {
-          result.error("NOT_INITIALIZED", null, null);
-        } else if (chatApi != null) {
-          result.error("CHAT_SESSION_ALREADY_OPEN", null, null);
-        } else {
-          VisitorInfo visitorInfo = new VisitorInfo.Builder()
-              .name(call.argument("visitorName"))
-              .email(call.argument("visitorEmail"))
-              .phoneNumber(call.argument("visitorPhone"))
-              .build();
+        ProfileProvider profileProvider = Chat.INSTANCE.providers().profileProvider();
+        ChatProvider chatProvider = Chat.INSTANCE.providers().chatProvider();
 
-          ZopimChatApi.setVisitorInfo(visitorInfo);
+        VisitorInfo visitorInfo = VisitorInfo.builder()
+                .withPhoneNumber(call.argument("visitorPhone"))
+                .withEmail(call.argument("visitorEmail"))
+                .withName(call.argument("visitorName"))
+                .build();
 
-          String department = call.argument("department");
-          String tags = call.argument("tags");
+        profileProvider.setVisitorInfo(visitorInfo, null);
 
-          ZopimChatApi.SessionConfig sessionConfig = new ZopimChatApi.SessionConfig();
+        String department = call.argument("department");
+        String tags = call.argument("tags");
 
-          if (!TextUtils.isEmpty(department)) {
-            sessionConfig.department(department);
-          }
-          if (!TextUtils.isEmpty(tags)) {
-            sessionConfig.tags(tags.split(","));
-          }
-
-          if (!TextUtils.isEmpty(applicationId)) {
-            sessionConfig.visitorPathTwo(applicationId);
-            sessionConfig.visitorPathOne("Mobile Chat connected");
-          }
-
-          chatApi = sessionConfig.build((FlutterFragmentActivity)registrar.activity());
-          bindChatListeners();
-          result.success(null);
+        if (!TextUtils.isEmpty(department)) {
+          chatProvider.setDepartment(department, null);
         }
+        if (!TextUtils.isEmpty(tags)) {
+          profileProvider.addVisitorTags(Arrays.asList(tags.split(",")), null);
+        }
+
+        if (!TextUtils.isEmpty(applicationId)) {
+          //sessionConfig.visitorPathTwo(applicationId);
+          //sessionConfig.visitorPathOne("Mobile Chat connected");
+        }
+
+        bindChatListeners();
+
+        Chat.INSTANCE.providers().connectionProvider().connect();
+
+        result.success(null);
         break;
       case "endChat":
-        if (chatApi == null) {
-          result.error("CHAT_NOT_STARTED", null, null);
-        } else {
           unbindChatListeners();
-          chatApi.endChat();
-          chatApi = null;
+          Chat.INSTANCE.providers().chatProvider().endChat(null);
           result.success(null);
-        }
         break;
       case "sendMessage":
-        if (chatApi == null) {
+        if (Chat.INSTANCE.providers().connectionProvider().getConnectionStatus() != ConnectionStatus.CONNECTED) {
           result.error("CHAT_NOT_STARTED", null, null);
         } else {
           String message = call.argument("message");
-          chatApi.send(message);
+          Chat.INSTANCE.providers().chatProvider().sendMessage(message);
           result.success(null);
         }
         break;
       case "resendMessage":
-        if (chatApi == null) {
+        if (Chat.INSTANCE.providers().connectionProvider().getConnectionStatus() != ConnectionStatus.CONNECTED) {
           result.error("CHAT_NOT_STARTED", null, null);
         } else {
           String messageId = call.argument("messageId");
-          chatApi.resend(messageId);
+          Chat.INSTANCE.providers().chatProvider().resendFailedMessage(messageId);
           result.success(null);
         }
         break;
       case "sendComment":
-        if (chatApi == null) {
+        if (Chat.INSTANCE.providers().connectionProvider().getConnectionStatus() != ConnectionStatus.CONNECTED) {
           result.error("CHAT_NOT_STARTED", null, null);
         } else {
           String comment = call.argument("comment");
-          chatApi.sendChatComment(comment);
+          Chat.INSTANCE.providers().chatProvider().sendChatComment(comment, null);
           result.success(null);
         }
         break;
-      case "sendAttachment":
-        if (chatApi == null) {
+      /*case "sendAttachment":
+        if (Chat.INSTANCE.providers().connectionProvider().getConnectionStatus() != ConnectionStatus.CONNECTED) {
           result.error("CHAT_NOT_STARTED", null, null);
         } else {
           FileSending policy = ZopimChatApi.getDataSource().getFileSending();
@@ -223,41 +202,47 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
             result.error("ATTACHMENT_DISALLOWED_EXTENSION", null, null);
             return;
           }
-          chatApi.send(file);
+          Chat.INSTANCE.providers().chatProvider().sendFile(file, null);
           result.success(null);
         }
-        break;
-      case "sendChatRating":
-        if (chatApi == null) {
+        break;*/
+      case "sendChatRating": {
+        if (Chat.INSTANCE.providers().connectionProvider().getConnectionStatus() != ConnectionStatus.CONNECTED) {
           result.error("CHAT_NOT_STARTED", null, null);
           return;
         }
-        ChatLog.Rating chatLogRating = ChatLog.Rating.UNKNOWN;
+        ChatRating chatLogRating = null;
+        ChatProvider provider = Chat.INSTANCE.providers().chatProvider();
         String rating = call.argument("rating");
         if (!TextUtils.isEmpty(rating)) {
           chatLogRating = toChatLogRating(rating);
         }
-        chatApi.sendChatRating(chatLogRating);
+
+        if (chatLogRating != null) {
+          provider.sendChatRating(chatLogRating, null);
+        }
 
         String comment = call.argument("comment");
         if (!TextUtils.isEmpty(comment)) {
-          chatApi.sendChatComment(comment);
+          provider.sendChatComment(comment, null);
         }
         result.success(null);
         break;
+      }
       case "sendOfflineMessage":
-        if (chatApi == null) {
+        if (Chat.INSTANCE.providers().connectionProvider().getConnectionStatus() != ConnectionStatus.CONNECTED) {
           result.error("CHAT_NOT_STARTED", null, null);
           return;
         }
-        VisitorInfo visitorInfo = chatApi.getConfig().getVisitorInfo();
-        if (TextUtils.isEmpty(visitorInfo.getEmail())) {
+        VisitorInfo info = Chat.INSTANCE.providers().profileProvider().getVisitorInfo();
+        if (TextUtils.isEmpty(info.getEmail())) {
           result.error("VISITOR_EMAIL_MUST_BE PROVIDED", null, null);
           return;
         }
-        result.success(chatApi.sendOfflineMessage(visitorInfo.getName(),
-            visitorInfo.getEmail(),
-            call.argument("message")));
+
+        Chat.INSTANCE.providers().chatProvider().sendOfflineForm(OfflineForm.builder(call.argument("message")).build(), null);
+
+        result.success(null);
 
         break;
       default:
@@ -268,69 +253,56 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
   private void bindChatListeners() {
     unbindChatListeners();
 
-    DataSource datasource = ZopimChatApi.getDataSource();
-
-    connectionObserver = new ConnectionObserver() {
+    connectionScope = new ObservationScope();
+    Chat.INSTANCE.providers().connectionProvider().observeConnectionStatus(connectionScope, new Observer<ConnectionStatus>() {
       @Override
-      protected void update(Connection connection) {
+      public void update(ConnectionStatus status) {
         mainHandler.post(() -> {
-          connectionStreamHandler.success(connection.getStatus().name());
+          connectionStreamHandler.success(status.name());
         });
       }
-    };
-    datasource.addConnectionObserver(connectionObserver).trigger();
+    });
 
-    accountObserver = new AccountObserver() {
+    accountScope = new ObservationScope();
+    Chat.INSTANCE.providers().accountProvider().observeAccount(accountScope, new Observer<Account>() {
       @Override
       public void update(Account account) {
         mainHandler.post(() -> {
-          accountStreamHandler.success(account.getStatus() != null ? account.getStatus().getValue() : Account.Status.UNKNOWN.getValue());
+          accountStreamHandler.success(account.getStatus().name());
         });
       }
-    };
-    datasource.addAccountObserver(accountObserver).trigger();
+    });
 
-    agentsObserver = new AgentsObserver() {
+    chatScope = new ObservationScope();
+    Chat.INSTANCE.providers().chatProvider().observeChatState(chatScope, new Observer<ChatState>() {
       @Override
-      protected void update(Map<String, Agent> agents) {
-        mainHandler.post(() -> {
-          String json = toJson(agents);
-          agentsStreamHandler.success(json);
-        });
-      }
-    };
-    datasource.addAgentsObserver(agentsObserver).trigger();
+      public void update(ChatState chatState) {
+        for (Agent agent: chatState.getAgents()) {
+          mainHandler.post(() -> {
+            agentsStreamHandler.success(toJson(agent));
+          });
+        }
 
-    chatLogObserver = new ChatLogObserver() {
-      @Override
-      protected void update(LinkedHashMap<String, ChatLog> items) {
         mainHandler.post(() -> {
-          String json = toJson(items);
+          String json = toJson(chatState.getChatLogs());
           chatItemsStreamHandler.success(json);
         });
       }
-    };
-    datasource.addChatLogObserver(chatLogObserver).trigger();
+    });
   }
 
   private void unbindChatListeners() {
-    DataSource datasource = ZopimChatApi.getDataSource();
-
-    if (connectionObserver != null) {
-      datasource.deleteConnectionObserver(connectionObserver);
-      connectionObserver = null;
+    if (connectionScope != null && !connectionScope.isCancelled()) {
+      connectionScope.cancel();
+      connectionScope = null;
     }
-    if (accountObserver != null) {
-      datasource.deleteAccountObserver(accountObserver);
-      accountObserver = null;
+    if (chatScope != null && !chatScope.isCancelled()) {
+      chatScope.cancel();
+      chatScope = null;
     }
-    if (agentsObserver != null) {
-      datasource.deleteAgentsObserver(agentsObserver);
-      agentsObserver = null;
-    }
-    if (chatLogObserver != null) {
-      datasource.deleteChatLogObserver(chatLogObserver);
-      chatLogObserver = null;
+    if (accountScope != null && !accountScope.isCancelled()) {
+      accountScope.cancel();
+      accountScope = null;
     }
   }
 
@@ -342,16 +314,14 @@ public class ZendeskFlutterPlugin implements MethodCallHandler {
         .replaceAll("\\$(string|int|bool)\":", "\":");
   }
 
-  private ChatLog.Rating toChatLogRating(String rating) {
+  private ChatRating toChatLogRating(String rating) {
     switch (rating) {
       case "ChatRating.GOOD":
-        return ChatLog.Rating.GOOD;
+        return ChatRating.GOOD;
       case "ChatRating.BAD":
-        return ChatLog.Rating.BAD;
-      case "ChatRating.UNRATED":
-        return ChatLog.Rating.UNRATED;
+        return ChatRating.BAD;
       default:
-        return ChatLog.Rating.UNKNOWN;
+        return null;
     }
   }
 }
