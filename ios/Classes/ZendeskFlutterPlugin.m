@@ -69,69 +69,60 @@
       result([FlutterError errorWithCode:@"NOT_INITIALIZED" message:nil details:nil]);
       return;
     }
-    if (self.chatApi) {
+    
+    if (ZDKChat.instance) {
       result([FlutterError errorWithCode:@"CHAT_SESSION_ALREADY_OPEN" message:nil details:nil]);
       return;
     }
-    self.chatApi = [ZDCChatAPI instance];
+      
+    [ZDKChat initializeWithAccountKey:self.accountKey queue:dispatch_get_main_queue()];
+      
+    ZDKChatAPIConfiguration *chatAPIConfiguration = [[ZDKChatAPIConfiguration alloc] init];
+    chatAPIConfiguration.department = [self argumentAsString:call forName:@"department"];
+    chatAPIConfiguration.visitorInfo = [[ZDKVisitorInfo alloc] initWithName:[self argumentAsString:call forName:@"visitorName"]
+                                                                        email:[self argumentAsString:call forName:@"visitorEmail"]
+                                                                  phoneNumber:[self argumentAsString:call forName:@"visitorPhone"]];
     
-    self.chatApi.visitorInfo.shouldPersist = NO;
-    self.chatApi.visitorInfo.name = [self argumentAsString:call forName:@"visitorName"];
-    self.chatApi.visitorInfo.email = [self argumentAsString:call forName:@"visitorEmail"];
-    self.chatApi.visitorInfo.phone = [self argumentAsString:call forName:@"visitorPhone"];
-    
-    ZDCAPIConfig *chatConfig = [[ZDCAPIConfig alloc] init];
-    chatConfig.department = [self argumentAsString:call forName:@"department"];
     NSString *tags = [self argumentAsString:call forName:@"tags"];
     if ([tags length] != 0) {
-      chatConfig.tags = [tags componentsSeparatedByString:@","];
+      chatAPIConfiguration.tags = [tags componentsSeparatedByString:@","];
     }
+
+    ZDKChat.instance.configuration = chatAPIConfiguration;
     
     [self bindChatListeners];
-    [self.chatApi startChatWithAccountKey:self.accountKey config: chatConfig];
+    [ZDKChat.connectionProvider connect];
     result(nil);
   } else if ([@"endChat" isEqualToString:call.method]) {
-    if (self.chatApi != nil) {
+    if (ZDKChat.instance != nil) {
       [self unbindChatListeners];
-      [self.chatApi endChat];
-      self.chatApi = nil;
+      [ZDKChat.chatProvider endChat:nil];
     }
     result(nil);
   } else if ([@"sendMessage" isEqualToString:call.method]) {
-    if (self.chatApi == nil) {
+    if (ZDKChat.instance == nil) {
       result([FlutterError errorWithCode:@"CHAT_NOT_STARTED" message:nil details:nil]);
       return;
     }
-    [self.chatApi sendChatMessage:call.arguments[@"message"]];
+    [ZDKChat.chatProvider sendMessage:call.arguments[@"message"] completion:nil];
     result(nil);
   } else if ([@"resendMessage" isEqualToString:call.method]) {
-     if (self.chatApi == nil) {
+     if (ZDKChat.instance == nil) {
        result([FlutterError errorWithCode:@"CHAT_NOT_STARTED" message:nil details:nil]);
        return;
      }
-      NSPredicate *predicate = [NSPredicate predicateWithFormat:@"eventId == %@", call.arguments[@"messageId"]];
-      NSArray *filteredChatEvents = [self.chatApi.livechatLog filteredArrayUsingPredicate:predicate];
-      ZDCChatEvent *chatEvent = [filteredChatEvents firstObject];
-      
-      if(chatEvent != nil) {
-          [self.chatApi resendChatMessage:chatEvent];
-      }
-      
+      //[ZDKChat.chatProvider resendFailedMessageWithId:call.arguments[@"messageId"]] completion:nil];
       result(nil);
    } else if ([@"sendComment" isEqualToString:call.method]) {
-      if (self.chatApi == nil) {
+      if (ZDKChat.instance == nil) {
         result([FlutterError errorWithCode:@"CHAT_NOT_STARTED" message:nil details:nil]);
         return;
       }
-      [self.chatApi sendChatRatingComment:call.arguments[@"comment"]];
+      [ZDKChat.chatProvider sendChatComment:call.arguments[@"comment"] completion:nil];
       result(nil);
     } else if ([@"sendAttachment" isEqualToString:call.method]) {
-    if (self.chatApi == nil) {
+    if (ZDKChat.instance == nil) {
       result([FlutterError errorWithCode:@"CHAT_NOT_STARTED" message:nil details:nil]);
-      return;
-    }
-    if (!self.chatApi.fileSendingEnabled) {
-      result([FlutterError errorWithCode:@"ATTACHMENT_SEND_DISABLED" message:nil details:nil]);
       return;
     }
     NSString* pathname = [self argumentAsString:call forName:@"pathname"];
@@ -145,26 +136,29 @@
       result([FlutterError errorWithCode:@"ATTACHMENT_FILE_MISSING" message:nil details:nil]);
       return;
     }
-    [self.chatApi uploadFileWithData:[filemgr contentsAtPath:pathname] name:filename];
+    [ZDKChat.chatProvider sendFileWithUrl:[filemgr contentsAtPath:pathname] onProgress:nil completion:nil];
     result(nil);
   } else if ([@"sendChatRating" isEqualToString:call.method]) {
-    if (self.chatApi == nil) {
+    if (ZDKChat.instance == nil) {
       result([FlutterError errorWithCode:@"CHAT_NOT_STARTED" message:nil details:nil]);
       return;
     }
     NSString* rating = [self argumentAsString:call forName:@"rating"];
-    [self.chatApi sendChatRating:[self toChatLogRating:rating]];
+    [ZDKChat.chatProvider sendChatRating:[self toChatLogRating:rating] completion:nil];
     NSString* comment = [self argumentAsString:call forName:@"comment"];
     if (comment != nil) {
-      [self.chatApi sendChatRatingComment:comment];
+        [ZDKChat.chatProvider sendChatComment:comment completion:nil];
     }
     result(nil);
   } else if ([@"sendOfflineMessage" isEqualToString:call.method]) {
-    if (self.chatApi == nil) {
+    if (ZDKChat.instance == nil) {
       result([FlutterError errorWithCode:@"CHAT_NOT_STARTED" message:nil details:nil]);
       return;
     }
-    [self.chatApi sendOfflineMessage:call.arguments[@"message"]];
+    ZDKOfflineForm *form = [[ZDKOfflineForm alloc] initWithVisitorInfo:ZDKChat.instance.profileProvider.visitorInfo
+                                                        departmentId:ZDKChat.instance.configuration.department
+                                                        message:call.arguments[@"message"]];
+    [ZDKChat.chatProvider sendOfflineForm:form completion:nil];
     result(nil);
   } else {
     result(FlutterMethodNotImplemented);
@@ -191,114 +185,147 @@
 }
 
 - (void) bindChatListeners {
-  [self unbindChatListeners];
-  [self.chatApi addObserver:self forConnectionEvents:@selector(connectionStateUpdated)];
-  [self.chatApi addObserver:self forAgentEvents:@selector(agentsUpdated)];
-  [self.chatApi addObserver:self forAccountEvents:@selector(accountUpdated)];
-  [self.chatApi addObserver:self forChatLogEvents:@selector(chatLogUpdated)];
-}
-
-- (void) connectionStateUpdated {
-  NSString *value;
-  switch (self.chatApi.connectionStatus) {
-    case ZDCConnectionStatusConnecting:
-      value = @("CONNECTING");
-      break;
-    case ZDCConnectionStatusConnected:
-      value = @("CONNECTED");
-      break;
-    case ZDCConnectionStatusClosed:
-      value = @("CLOSED");
-      break;
-    case ZDCConnectionStatusDisconnected:
-      value = @("DISCONNECTED");
-      break;
-    case ZDCConnectionStatusNoConnection:
-      value = @("NO_CONNECTION");
-      break;
-    default:
-      value = @("UNKNOWN");
-      break;
-  }
-  [self.connectionStreamHandler send:value];
-}
-
-- (void) agentsUpdated {
-  NSMutableDictionary *out = [[NSMutableDictionary alloc] initWithCapacity:[self.chatApi.agents count]];
-  [self.chatApi.agents enumerateKeysAndObjectsUsingBlock:^(NSString *key, ZDCChatAgent *agent, BOOL *stop) {
-    NSMutableDictionary *agentDict = [[NSMutableDictionary alloc] init];
-    [agentDict setValue:agent.displayName forKey:@"displayName"];
-    [agentDict setValue:agent.avatarURL forKey:@"avatarURL"];
-    [agentDict setValue:@(agent.typing) forKey:@"typing"];
-    [agentDict setValue:agent.title forKey:@"title"];
-    [out setObject:agentDict forKey:key];
-  }];
-  [self.agentsStreamHandler send:[self toJson:out]];
-  
-}
-
-- (void) accountUpdated {
-  [self.accountStreamHandler send:(self.chatApi.isAccountOnline ? @("ONLINE") : @("OFFLINE"))];
-}
-
-- (void) chatLogUpdated {
-  NSArray<ZDCChatEvent*> *chatLog = self.chatApi.livechatLog;
-  NSMutableArray* out = [[NSMutableArray alloc] initWithCapacity:[chatLog count]];
-  for (ZDCChatEvent* event in chatLog) {
-    NSMutableDictionary* chatItem = [[NSMutableDictionary alloc] init];
-    [chatItem setValue:event.eventId forKey:@"id"];
-    [chatItem setValue:event.timestamp forKey:@"timestamp"];
-    [chatItem setValue:event.nickname forKey:@"nick"];
-    [chatItem setValue:event.displayName forKey:@"display_name"];
-    [chatItem setValue:event.message forKey:@"msg"];
-    [chatItem setValue:[self chatEventTypeToString:event.type] forKey:@"type"];
-    [chatItem setValue:@(event.verified) forKey:@"verified"];
-    [chatItem setValue:[self chatLogRatingToString:event.rating] forKey:@"new_rating"];
-    [chatItem setValue:event.ratingComment forKey:@"new_comment"];
-    if ([event.options count] > 0) {
-      [chatItem setValue:event.options forKey:@"options"];
-      [chatItem setValue:[[NSNumber alloc] initWithLong:event.selectedOptionIndex] forKey:@"selectedOptionIndex"];
-    }
-    if (event.attachment != nil) {
-      [chatItem setValue:[self attachmentToDictionary:event.attachment] forKey:@"attachment"];
-    }
-    [out addObject:chatItem];
-  }
-  [self.chatItemsStreamHandler send:[self toJson:out]];
+    [self unbindChatListeners];
+    
+    _accountToken = [ZDKChat.accountProvider observeAccount:^(ZDKChatAccount *account) {
+        [self.accountStreamHandler send:(account.accountStatus == ZDKChatAccountStatusOnline ? @("ONLINE") : @("OFFLINE"))];
+    }];
+    
+    _chatToken = [ZDKChat.chatProvider observeChatState:^(ZDKChatState *chatState) {
+        NSMutableArray* outAgents = [[NSMutableArray alloc] initWithCapacity:[chatState.agents count]];
+        NSLog(@"Agent count:%tu", chatState.agents.count);
+        [chatState.agents enumerateObjectsUsingBlock:^(ZDKAgent *agent, NSUInteger index, BOOL *stop) {
+          NSMutableDictionary *agentDict = [[NSMutableDictionary alloc] init];
+          [agentDict setValue:agent.displayName forKey:@"display_name"];
+          [agentDict setValue:agent.avatar forKey:@"avatar_path"];
+          [agentDict setValue:@(agent.isTyping) forKey:@"is_typing"];
+          [agentDict setValue:agent.nick forKey:@"nick"];
+          [outAgents addObject:agentDict];
+        }];
+        [self.agentsStreamHandler send:[self toJson:outAgents]];
+        
+        NSMutableArray* outLogs = [[NSMutableArray alloc] initWithCapacity:[chatState.logs count]];
+        NSLog(@"Log count:%tu", chatState.logs.count);
+        for (ZDKChatLog* event in chatState.logs) {
+          NSMutableDictionary* chatItem = [[NSMutableDictionary alloc] init];
+          [chatItem setValue:event.id forKey:@"id"];
+          [chatItem setValue:@(event.createdTimestamp) forKey:@"create_timestamp"];
+          [chatItem setValue:@(event.lastModifiedTimestamp) forKey:@"modify_timestamp"];
+          [chatItem setValue:event.nick forKey:@"nick"];
+          [chatItem setValue:event.displayName forKey:@"display_name"];
+          [chatItem setValue:[self chatEventTypeToString:event.type] forKey:@"type"];
+          [chatItem setValue:[self deliveryStatusToString:event.deliveryStatus] forKey:@"delivery_status"];
+          [chatItem setValue:[self participantToString:event.participant] forKey:@"participant"];
+            
+          if ([chatItem isMemberOfClass:[ZDKChatMessage class]]) {
+                ZDKChatMessage *message = (ZDKChatMessage *)chatItem;
+                [chatItem setValue:message.message forKey:@"message"];
+          }
+            
+          if ([chatItem isMemberOfClass:[ZDKChatRating class]]) {
+                ZDKChatRating *rating = (ZDKChatRating *)chatItem;
+                [chatItem setValue:[self chatLogRatingToString:rating.ratingValue] forKey:@"current_rating"];
+          }
+            
+          if ([chatItem isMemberOfClass:[ZDKChatAttachmentMessage class]]) {
+                //[chatItem setValue:[self attachmentToDictionary:event.attachment] forKey:@"attachment"];
+          }
+            
+          if ([chatItem isMemberOfClass:[ZDKChatComment class]]) {
+                ZDKChatComment *comment = (ZDKChatComment *)chatItem;
+                [chatItem setValue:comment.comment forKey:@"new_comment"];
+          }
+          
+          [outLogs addObject:chatItem];
+        }
+        [self.chatItemsStreamHandler send:[self toJson:outLogs]];
+    }];
+    
+    _chatToken = [ZDKChat.connectionProvider observeConnectionStatus:^(enum ZDKConnectionStatus status) {
+        NSString *value;
+        switch (status) {
+          case ZDKConnectionStatusConnecting:
+            value = @("CONNECTING");
+            break;
+          case ZDKConnectionStatusConnected:
+            value = @("CONNECTED");
+            break;
+          case ZDKConnectionStatusFailed:
+            value = @("FAILED");
+            break;
+          case ZDKConnectionStatusDisconnected:
+            value = @("DISCONNECTED");
+            break;
+          case ZDKConnectionStatusUnreachable:
+            value = @("UNREACHABLE");
+            break;
+          case ZDKConnectionStatusReconnecting:
+            value = @("RECONNECTING");
+            break;
+          default:
+            value = @("UNKNOWN");
+            break;
+        }
+        [self.connectionStreamHandler send:value];
+    }];
 }
 
 - (void) unbindChatListeners {
-  [self.chatApi removeObserverForConnectionEvents:self];
-  [self.chatApi removeObserverForAgentEvents:self];
-  [self.chatApi removeObserverForAccountEvents:self];
-  [self.chatApi removeObserverForConnectionEvents:self];
+  [_connectionToken cancel];
+  [_accountToken cancel];
+  [_chatToken cancel];
 }
 
-- (NSString*) chatEventTypeToString:(ZDCChatEventType)type {
+- (NSString*) chatEventTypeToString:(ZDKChatLogType)type {
   switch (type) {
-    case ZDCChatEventTypeMemberJoin:
-      return @"chat.memberjoin";
-    case ZDCChatEventTypeMemberLeave:
-      return @"chat.memberleave";
-    case ZDCChatEventTypeSystemMessage:
-      return @"chat.systemmsg";
-    case ZDCChatEventTypeTriggerMessage:
-      return @"chat.triggermsg";
-    case ZDCChatEventTypeAgentMessage:
-    case ZDCChatEventTypeVisitorMessage:
-    case ZDCChatEventTypeVisitorUpload:
-    case ZDCChatEventTypeAgentUpload:
-      return @"chat.msg";
-    case ZDCChatEventTypeRating:
-      return @"chat.rating";
-    case ZDCChatEventTypeRatingComment:
-      return @"chat.comment";
+    case ZDKChatLogTypeMessage:
+      return @"MESSAGE";
+    case ZDKChatLogTypeAttachmentMessage:
+      return @"ATTACHMENT_MESSAGE";
+    case ZDKChatLogTypeMemberJoin:
+      return @"MEMEBER_JOIN";
+    case ZDKChatLogTypeMemberLeave:
+      return @"MEMBER_LEAVE";
+    case ZDKChatLogTypeChatComment:
+      return @"COMMENT";
+    case ZDKChatLogTypeChatRating:
+      return @"RATING";
+    case ZDKChatLogTypeChatRatingRequest:
+      return @"RATING_REQUEST";
     default:
       return @"UNKNOWN";
   }
 }
 
-- (NSDictionary*) attachmentToDictionary:(ZDCChatAttachment*)attachment {
+- (NSString*) deliveryStatusToString:(ZDKDeliveryStatus)status {
+  switch (status) {
+    case ZDKDeliveryStatusPending:
+      return @"PENDING";
+    case ZDKDeliveryStatusDelivered:
+      return @"DELIVERED";
+    case ZDKDeliveryStatusFailed:
+      return @"FAILED";
+    default:
+      return @"UNKNOWN";
+  }
+}
+
+- (NSString*) participantToString:(ZDKChatParticipant)participant {
+  switch (participant) {
+    case ZDKChatParticipantVisitor:
+      return @"VISITOR";
+    case ZDKChatParticipantAgent:
+      return @"AGENT";
+    case ZDKChatParticipantTrigger:
+      return @"TRIGGER";
+    case ZDKChatParticipantSystem:
+      return @"SYSTEM";
+    default:
+      return @"UNKNOWN";
+  }
+}
+
+/*- (NSDictionary*) attachmentToDictionary:(ZDKChatAttachment*)attachment {
   if (attachment == nil) {
     return nil;
   }
@@ -309,7 +336,7 @@
   [out setValue:attachment.mimeType forKey:@"mime_type"];
   [out setValue:attachment.fileName forKey:@"name"];
   return out;
-}
+}*/
 
 - (NSString*) toJson:(NSObject*)object {
   NSError *error = nil;
@@ -324,28 +351,24 @@
   }
 }
 
-- (ZDCChatRating) toChatLogRating:(NSString*) rating {
+- (ZDKRating) toChatLogRating:(NSString*) rating {
   if ([@"ChatRating.GOOD" isEqualToString:rating]) {
-    return ZDCChatRatingGood ;
+    return ZDKRatingGood;
   } else if ([@"ChatRating.BAD" isEqualToString:rating]) {
-    return ZDCChatRatingBad;
-  } else if ([@"ChatRating.UNRATED" isEqualToString:rating]) {
-    return ZDCChatRatingUnrated;
+    return ZDKRatingBad;
   } else {
-    return ZDCChatRatingNone;
+    return ZDKRatingNone;
   }
 }
 
-- (NSString*) chatLogRatingToString:(ZDCChatRating)rating {
+- (NSString*) chatLogRatingToString:(ZDKRating)rating {
   switch (rating) {
-    case ZDCChatRatingGood:
-      return @"good";
-    case ZDCChatRatingBad:
-      return @"bad";
-    case ZDCChatRatingUnrated:
-      return @"unrated";
+    case ZDKRatingGood:
+      return @"GOOD";
+    case ZDKRatingBad:
+      return @"BAD";
     default:
-      return @"unknown";
+      return nil;
   }
 }
 

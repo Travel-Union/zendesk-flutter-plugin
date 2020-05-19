@@ -1,5 +1,5 @@
 #import <Flutter/Flutter.h>
-#import <ZDCChat/ZDCChat.h>
+#import <ChatProvidersSDK/ChatProvidersSDK.h>
 
 @interface EventChannelStreamHandler : NSObject <FlutterStreamHandler>
 @property (nonatomic, strong) FlutterEventSink eventSink;
@@ -9,12 +9,15 @@
 @interface ZendeskFlutterPlugin : NSObject<FlutterPlugin>
 
 @property (nonatomic, strong) NSString *accountKey;
-@property (nonatomic, strong) ZDCChatAPI *chatApi;
 
 @property (nonatomic, strong) EventChannelStreamHandler *connectionStreamHandler;
 @property (nonatomic, strong) EventChannelStreamHandler *accountStreamHandler;
 @property (nonatomic, strong) EventChannelStreamHandler *agentsStreamHandler;
 @property (nonatomic, strong) EventChannelStreamHandler *chatItemsStreamHandler;
+
+@property(nonatomic, retain) ZDKObservationToken *connectionToken;
+@property(nonatomic, retain) ZDKObservationToken *accountToken;
+@property(nonatomic, retain) ZDKObservationToken *chatToken;
 
 + (void) registerWithRegistrar:(NSObject<FlutterPluginRegistrar>*)registrar;
 

@@ -193,37 +193,18 @@ class Agent extends AbstractModel {
   Agent(String id, Map attributes, [@visibleForTesting String os])
       : super(id, attributes, os);
 
-  String get displayName {
-    if (os() == 'android') {
-      return attribute('display_name');
-    } else if (os() == 'ios') {
-      return attribute('displayName');
-    } else {
-      return null;
-    }
-  }
+  String get displayName => attribute('display_name');
 
-  String get nick {
-    return attribute('nick');
-  }
+  String get nick => attribute('nick');
 
-  bool get isTyping {
-    return attribute('is_typing');
-  }
+  bool get isTyping => attribute('is_typing');
 
-  String get avatarUri {
-    if (os() == 'android') {
-      return attribute('avatar_path');
-    } else if (os() == 'ios') {
-      return attribute('avatarURL');
-    } else {
-      return null;
-    }
-  }
+  String get avatarUri => attribute('avatar_path');
 
   static List<Agent> parseAgentsJson(String json,
       [@visibleForTesting String os]) {
     var out = List<Agent>();
+    print(json);
     jsonDecode(json).forEach((value) {
       out.add(Agent(null, value, os));
     });
@@ -370,6 +351,7 @@ class ChatItem extends AbstractModel {
   static List<ChatItem> parseChatItemsJsonForIOS(String json,
       [@visibleForTesting String os]) {
     var out = List<ChatItem>();
+    print(json);
     jsonDecode(json).forEach((value) {
       out.add(ChatItem(value, os));
     });
